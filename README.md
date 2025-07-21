@@ -54,6 +54,10 @@ Install dependencies:
 pip install tzlocal
 ```
 
+## Toolbox
+
+Some other scripts for checkpoint log filtering and selection are also packed together in this repository.
+
 ## License
 
 MIT
