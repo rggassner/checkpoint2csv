@@ -1,77 +1,107 @@
-#!/usr/bin/python3
-import sys,re,tzlocal,argparse
+#!venv/bin/python3
+#pylint: disable=too-many-branches
+"""
+Check Point Log Parser
+
+This script reads raw Check Point log entries from standard input (stdin), extracts specific
+fields, and outputs them in either a key-value format (Checkpoint style) or a CSV format.
+It automatically converts Unix timestamps into human-readable local time strings.
+
+Fields extracted: time, src, s_port, dst, service, xlatesrc.
+
+Usage:
+    cat logs.txt | python3 script.py [options]
+
+Options:
+    -c, --checkpoint    Output in key="value" format (default is CSV).
+    -r, --require-all   Filter output to only include log lines where every specified
+                        field was successfully found.
+
+Example:
+    tail -f /var/log/messages | python3 script.py --checkpoint --require-all
+"""
+import sys
+import re
+import argparse
 from datetime import datetime
 
-fields="time,src,s_port,dst,service,service_id,action,xlatesrc"
+fields_list = "time,src,s_port,dst,service,xlatesrc".split(',')
 
-def ckp_output():
+def process_logs(output_format, require_all):
     """
-    Reads lines from stdin and extracts defined fields in Check Point log format.
-
-    For each line, it parses the specified fields and prints them in key="value" format.
-    Additionally, for the `time` field, it appends a `time_formatted` field with a human-readable timestamp.
+    Processes logs from stdin. 
+    output_format: 'ckp' or 'csv'
+    require_all: Boolean, if True only lines with all fields are printed.
     """
-    for line in sys.stdin:
-        line=line.strip()
-        lineout=''
-        for field in fields.split(','):
-            result=re.search(r' '+field+'="(.*?)"',line)
-            if result:
-                if field == 'time':
-                    lineout=lineout+'time_formatted="'+str(datetime.fromtimestamp(float(result.group(1)),tzlocal.get_localzone()))+'" '+field+'="'+result.group(1)+'" '
-                else:
-                    lineout=lineout+field+'="'+result.group(1)+'" '
-        print('{}'.format(lineout))
-        lineout=''
-
-def csv_header():
-    """
-    Prints a CSV header line based on the defined fields.
-
-    Includes an additional `time_formatted` column for the `time` field.
-    """
-    header=''
-    for field in fields.split(','):
-        if field == 'time':
-            header=header+'time_formatted,time,'
-        else:
-            header=header+field+','
-    header=header[:-1]
-    print(header)
-
-def csv_output():
-    """
-    Reads lines from stdin and extracts defined fields, outputting them in CSV format.
-
-    Includes a human-readable `time_formatted` field for the `time` value.
-    If a field is missing from the log line, it leaves the corresponding CSV column empty.
-    """
-    csv_header()
-    for line in sys.stdin:
-        line=line.strip()
-        lineout=''
-        for field in fields.split(','):
-            result=re.search(r' '+field+'="(.*?)"',line)
-            if result:
-                if field == 'time':
-                    lineout=lineout+str(datetime.fromtimestamp(float(result.group(1)),tzlocal.get_localzone()))+','+result.group(1)+','
-                else:
-                    lineout=lineout+result.group(1)+','
+    if output_format == 'csv':
+        # Print CSV Header
+        header = []
+        for f in fields_list:
+            if f == 'time':
+                header.extend(['time_formatted', 'time'])
             else:
-                lineout=lineout+','
-        lineout=lineout[:-1]
-        print('{}'.format(lineout))
-        lineout=''
+                header.append(f)
+        print(",".join(header))
 
-argParser = argparse.ArgumentParser()
-argParser.add_argument('-c','--checkpoint',action='store_true',help='Output in checkpoint format instead of csv.')
-argParser.set_defaults(checkpoint=False)
-args=argParser.parse_args()
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
 
-ckp=args.checkpoint
+        extracted = {}
+        found_count = 0
 
-if ckp:
-    ckp_output()
-else:
-    csv_output()
+        for field in fields_list:
+            result = re.search(r' ' + field + r'="(.*?)"', line)
+            if result:
+                extracted[field] = result.group(1)
+                found_count += 1
+            else:
+                extracted[field] = None
 
+        # Filter logic: if require_all is True, check if we found everything
+        if require_all and found_count < len(fields_list):
+            continue
+
+        # Output Generation
+        if output_format == 'ckp':
+            lineout = ''
+            for field in fields_list:
+                val = extracted[field]
+                if val is not None:
+                    if field == 'time':
+                        fmt_time = datetime.fromtimestamp(
+                                float(val)).astimezone().isoformat(sep=' ', timespec='seconds'
+                                )
+                        lineout += f'time_formatted="{fmt_time}" time="{val}" '
+                    else:
+                        lineout += f'{field}="{val}" '
+            if lineout:
+                print(lineout.strip())
+
+        else: # CSV format
+            row = []
+            for field in fields_list:
+                val = extracted[field]
+                if field == 'time':
+                    if val:
+                        fmt_time = datetime.fromtimestamp(
+                                float(val)).astimezone().isoformat(sep=' ', timespec='seconds'
+                                )
+                        row.extend([fmt_time, val])
+                    else:
+                        row.extend(['', ''])
+                else:
+                    row.append(val if val is not None else '')
+            print(",".join(row))
+
+if __name__ == "__main__":
+    ARGPARSER = argparse.ArgumentParser(description='Parse Check Point logs from stdin.')
+    ARGPARSER.add_argument('-c', '--checkpoint', action='store_true',
+                           help='Output in checkpoint format instead of csv.')
+    ARGPARSER.add_argument('-r', '--require-all', action='store_true',
+                           help='Only output lines that contain all specified fields.')
+    args = ARGPARSER.parse_args()
+
+    FMT = 'ckp' if args.checkpoint else 'csv'
+    process_logs(FMT, args.require_all)
