@@ -25,7 +25,7 @@ import re
 import argparse
 from datetime import datetime
 
-fields_list = "time,src,s_port,dst,service,xlatesrc,action".split(',')
+fields_list = "time,src,s_port,dst,service,xlatesrc,office_mode_ip,action".split(',')
 
 def process_logs(output_format, require_all):
     """
